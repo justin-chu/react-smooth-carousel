@@ -117,6 +117,7 @@ export type MarqueeProps = {
    * @type {ReactNode}
    * @default null
    */
+  fixedWidth?: number;
   children?: ReactNode;
 } & RefAttributes<HTMLDivElement>;
 
@@ -139,6 +140,7 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
     onCycleComplete,
     onMount,
     children,
+    fixedWidth,
   },
   ref
 ) {
@@ -157,12 +159,12 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
       const containerRect = containerRef.current.getBoundingClientRect();
       const marqueeRect = marqueeRef.current.getBoundingClientRect();
       let containerWidth = containerRect.width;
-      let marqueeWidth = marqueeRect.width;
+      let marqueeWidth = fixedWidth || marqueeRect.width;
 
       // Swap width and height if direction is up or down
       if (direction === "up" || direction === "down") {
         containerWidth = containerRect.height;
-        marqueeWidth = marqueeRect.height;
+        marqueeWidth = fixedWidth || marqueeRect.height;
       }
 
       if (autoFill && containerWidth && marqueeWidth) {
@@ -178,7 +180,7 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
       setContainerWidth(containerWidth);
       setMarqueeWidth(marqueeWidth);
     }
-  }, [autoFill, containerRef, direction]);
+  }, [autoFill, containerRef, direction, fixedWidth]);
 
   // Calculate width and multiplier on mount and on window resize
   useEffect(() => {
