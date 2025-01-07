@@ -15,6 +15,12 @@ import React, {
 } from "react";
 import "./Marquee.scss";
 
+type DarkModeGradient = {
+  enabled: boolean;
+  color: string;
+  gradientWidth?: number;
+} | null;
+
 export type MarqueeProps = {
   /**
    * @description Inline style for the container div
@@ -95,6 +101,12 @@ export type MarqueeProps = {
    */
   gradientWidth?: number | string;
   /**
+   * @description Dark mode gradient configuration
+   * @type {{ enabled: boolean; color: string; gradientWidth?: number }}
+   * @default null
+   */
+  darkModeGradient?: DarkModeGradient;
+  /**
    * @description A callback for when the marquee finishes scrolling and stops. Only calls if loop is non-zero.
    * @type {() => void}
    * @default null
@@ -135,6 +147,7 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
     gradient = false,
     gradientColor = "white",
     gradientWidth = 200,
+    darkModeGradient = null,
     onFinish,
     onCycleComplete,
     onMount,
@@ -153,9 +166,12 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
 
   // Calculate width of container and marquee and set multiplier
   const calculateWidth = useCallback(() => {
-    if (marqueeRef.current && containerRef.current) {
-      const containerRect = containerRef.current.getBoundingClientRect();
-      const marqueeRect = marqueeRef.current.getBoundingClientRect();
+    const container = containerRef.current;
+    const marquee = marqueeRef.current;
+
+    if (container && marquee) {
+      const containerRect = container.getBoundingClientRect();
+      const marqueeRect = marquee.getBoundingClientRect();
       let containerWidth = containerRect.width;
       let marqueeWidth = marqueeRect.width;
 
@@ -185,12 +201,14 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
     if (!isMounted) return;
 
     calculateWidth();
-    if (marqueeRef.current && containerRef.current) {
+    const container = containerRef.current;
+    const marquee = marqueeRef.current;
+
+    if (container && marquee) {
       const resizeObserver = new ResizeObserver(() => calculateWidth());
-      resizeObserver.observe(containerRef.current);
-      resizeObserver.observe(marqueeRef.current);
+      resizeObserver.observe(container);
+      resizeObserver.observe(marquee);
       return () => {
-        if (!resizeObserver) return;
         resizeObserver.disconnect();
       };
     }
@@ -210,17 +228,16 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
     if (typeof onMount === "function") {
       onMount();
     }
-  }, []);
+  }, [onMount]);
 
   // Animation duration
   const duration = useMemo(() => {
     if (autoFill) {
       return (marqueeWidth * multiplier) / speed;
-    } else {
-      return marqueeWidth < containerWidth
-        ? containerWidth / speed
-        : marqueeWidth / speed;
     }
+    return marqueeWidth < containerWidth
+      ? containerWidth / speed
+      : marqueeWidth / speed;
   }, [autoFill, containerWidth, marqueeWidth, multiplier, speed]);
 
   const containerStyle = useMemo(
@@ -233,7 +250,7 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
           ? "paused"
           : "running",
       ["--width" as string]:
-        direction === "up" || direction === "down" ? `100vh` : "100%",
+        direction === "up" || direction === "down" ? "100vh" : "100%",
       ["--transform" as string]:
         direction === "up"
           ? "rotate(-90deg)"
@@ -244,16 +261,21 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
     [style, play, pauseOnHover, pauseOnClick, direction]
   );
 
-  const gradientStyle = useMemo(
-    () => ({
-      ["--gradient-color" as string]: gradientColor,
+  const gradientStyle = useMemo(() => {
+    const darkModeEnabled = darkModeGradient?.enabled ?? false;
+    const finalColor = darkModeEnabled
+      ? darkModeGradient?.color
+      : gradientColor;
+    const finalWidth = darkModeEnabled
+      ? darkModeGradient?.gradientWidth ?? gradientWidth
+      : gradientWidth;
+
+    return {
+      ["--gradient-color" as string]: finalColor,
       ["--gradient-width" as string]:
-        typeof gradientWidth === "number"
-          ? `${gradientWidth}px`
-          : gradientWidth,
-    }),
-    [gradientColor, gradientWidth]
-  );
+        typeof finalWidth === "number" ? `${finalWidth}px` : finalWidth,
+    };
+  }, [gradientColor, gradientWidth, darkModeGradient]);
 
   const marqueeStyle = useMemo(
     () => ({
@@ -262,7 +284,7 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
       ["--duration" as string]: `${duration}s`,
       ["--delay" as string]: `${delay}s`,
       ["--iteration-count" as string]: !!loop ? `${loop}` : "infinite",
-      ["--min-width" as string]: autoFill ? `auto` : "100%",
+      ["--min-width" as string]: autoFill ? "auto" : "100%",
     }),
     [play, direction, duration, delay, loop, autoFill]
   );
@@ -288,24 +310,24 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
         ),
       ].map((_, i) => (
         <Fragment key={i}>
-          {Children.map(children, (child) => {
-            return (
-              <div style={childStyle} className="rfm-child">
-                {child}
-              </div>
-            );
-          })}
+          {Children.map(children, (child) => (
+            <div style={childStyle} className="rfm-child">
+              {child}
+            </div>
+          ))}
         </Fragment>
       ));
     },
     [childStyle, children]
   );
 
-  return !isMounted ? null : (
+  if (!isMounted) return null;
+
+  return (
     <div
       ref={containerRef}
       style={containerStyle}
-      className={"rfm-marquee-container " + className}
+      className={`rfm-marquee-container ${className}`}
     >
       {gradient && <div style={gradientStyle} className="rfm-overlay" />}
       <div
@@ -315,13 +337,11 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
         onAnimationEnd={onFinish}
       >
         <div className="rfm-initial-child-container" ref={marqueeRef}>
-          {Children.map(children, (child) => {
-            return (
-              <div style={childStyle} className="rfm-child">
-                {child}
-              </div>
-            );
-          })}
+          {Children.map(children, (child) => (
+            <div style={childStyle} className="rfm-child">
+              {child}
+            </div>
+          ))}
         </div>
         {multiplyChildren(multiplier - 1)}
       </div>
