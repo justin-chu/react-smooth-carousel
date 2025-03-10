@@ -53,6 +53,12 @@ export type MarqueeProps = {
    */
   pauseOnClick?: boolean;
   /**
+   * @description Whether the marquee should be draggable with mouse/touch
+   * @type {boolean}
+   * @default false
+   */
+  draggable?: boolean;
+  /**
    * @description The direction the marquee is sliding
    * @type {"left" | "right" | "up" | "down"}
    * @default "left"
@@ -128,6 +134,7 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
     play = true,
     pauseOnHover = false,
     pauseOnClick = false,
+    draggable = false,
     direction = "left",
     speed = 50,
     delay = 0,
@@ -150,6 +157,20 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = (ref as MutableRefObject<HTMLDivElement>) || rootRef;
   const marqueeRef = useRef<HTMLDivElement>(null);
+
+  // State for dragging
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStartPos, setDragStartPos] = useState(0);
+  // Refs to access the marquee elements
+  const firstMarqueeRef = useRef<HTMLDivElement>(null);
+  const secondMarqueeRef = useRef<HTMLDivElement>(null);
+
+  // Add state to track the current animation position
+  const [animationPosition, setAnimationPosition] = useState(0);
+
+  // Refs for animation frame and current position
+  const animationFrameRef = useRef<number | null>(null);
+  const currentDragOffsetRef = useRef(0);
 
   // Calculate width of container and marquee and set multiplier
   const calculateWidth = useCallback(() => {
@@ -223,13 +244,217 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
     }
   }, [autoFill, containerWidth, marqueeWidth, multiplier, speed]);
 
+  // Function to get the current translation value from the marquee
+  const getCurrentTranslation = useCallback(() => {
+    if (!firstMarqueeRef.current) return 0;
+
+    try {
+      // Get computed style of the element
+      const style = window.getComputedStyle(firstMarqueeRef.current);
+      const transform = style.getPropertyValue("transform");
+
+      // No transform or identity matrix means position is at 0
+      if (transform === "none" || transform === "matrix(1, 0, 0, 1, 0, 0)") {
+        return 0;
+      }
+
+      // Parse the transform matrix to get the translateX value
+      const matrix = transform.match(/matrix\((.+)\)/);
+      if (matrix) {
+        const values = matrix[1].split(", ");
+        return parseFloat(values[4]);
+      }
+
+      return 0;
+    } catch (error) {
+      console.error("Error getting current translation:", error);
+      return 0;
+    }
+  }, []);
+
+  // Apply transform with requestAnimationFrame for smoother dragging
+  useEffect(() => {
+    // No need to run animation frame if not dragging
+    if (!isDragging) {
+      // Cancel any existing animation frame when dragging stops
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      return;
+    }
+
+    // Initial animation position
+    const initialPosition = animationPosition;
+
+    // Smooth animation function using requestAnimationFrame
+    const animateDrag = () => {
+      if (!firstMarqueeRef.current || !secondMarqueeRef.current) return;
+
+      // Calculate current transform
+      const transformValue = `translateX(${
+        initialPosition + currentDragOffsetRef.current
+      }px)`;
+
+      // Apply to both marquees
+      [firstMarqueeRef.current, secondMarqueeRef.current].forEach((marquee) => {
+        // Apply with a very slight transition for smoothness
+        marquee.style.cssText += `
+          transform: ${transformValue} !important; 
+          transition: transform 0.05s linear !important;
+        `
+          .trim()
+          .replace(/\s+/g, " ");
+      });
+
+      // Continue the animation loop
+      animationFrameRef.current = requestAnimationFrame(animateDrag);
+    };
+
+    // Start the animation loop
+    animationFrameRef.current = requestAnimationFrame(animateDrag);
+
+    // Clean up when done
+    return () => {
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+    };
+  }, [isDragging, animationPosition]);
+
+  // Start dragging - capture current position
+  const handleDragStart = useCallback(
+    (e: React.MouseEvent | React.TouchEvent) => {
+      if (!draggable) return;
+
+      // Start dragging
+      setIsDragging(true);
+
+      // Get the correct client position based on direction
+      const clientPos = ["left", "right"].includes(direction)
+        ? "touches" in e
+          ? e.touches[0].clientX
+          : (e as React.MouseEvent).clientX
+        : "touches" in e
+        ? e.touches[0].clientY
+        : (e as React.MouseEvent).clientY;
+
+      // Store the initial drag position
+      setDragStartPos(clientPos);
+
+      // Get and store the current animation translation
+      const currentTranslation = getCurrentTranslation();
+      setAnimationPosition(currentTranslation);
+
+      // Initialize drag offset
+      currentDragOffsetRef.current = 0;
+
+      e.preventDefault();
+    },
+    [draggable, direction, getCurrentTranslation]
+  );
+
+  // Handle drag movement
+  const handleDragMove = useCallback(
+    (e: MouseEvent | TouchEvent) => {
+      if (!isDragging) return;
+
+      // Get current position based on direction
+      const clientPos = ["left", "right"].includes(direction)
+        ? "touches" in e
+          ? (e as TouchEvent).touches[0].clientX
+          : (e as MouseEvent).clientX
+        : "touches" in e
+        ? (e as TouchEvent).touches[0].clientY
+        : (e as MouseEvent).clientY;
+
+      // Calculate the drag offset
+      let newOffset = clientPos - dragStartPos;
+
+      // For direction="up", we need to invert the drag direction
+      // because the container is rotated -90 degrees
+      if (direction === "up") {
+        newOffset = -newOffset;
+      }
+
+      // Update the ref directly for smoother animation
+      currentDragOffsetRef.current = newOffset;
+
+      e.preventDefault();
+    },
+    [isDragging, dragStartPos, direction]
+  );
+
+  // End dragging
+  const handleDragEnd = useCallback(() => {
+    if (!isDragging) return;
+
+    // When drag ends, we want a smooth transition back to the animation
+    // First, get the current marquee elements
+    const marquees = [firstMarqueeRef.current, secondMarqueeRef.current].filter(
+      Boolean
+    );
+
+    // Apply a brief transition for smooth resumption of animation
+    marquees.forEach((marquee) => {
+      if (marquee) {
+        // Remove the CSS properties added during dragging
+        marquee.style.cssText = marquee.style.cssText
+          .replace(
+            /\s*transform\s*:\s*translateX\([^)]+\)\s*!important\s*;/g,
+            ""
+          )
+          .replace(
+            /\s*transition\s*:\s*transform[^;]+!important\s*;/g,
+            "transition: transform 3.3s ease-out !important;"
+          );
+
+        // Remove the transition after it completes
+        setTimeout(() => {
+          if (marquee)
+            marquee.style.cssText = marquee.style.cssText.replace(
+              /\s*transition\s*:\s*transform[^;]+!important\s*;/g,
+              ""
+            );
+        }, 3300);
+      }
+    });
+
+    // Reset state
+    setIsDragging(false);
+    currentDragOffsetRef.current = 0;
+  }, [isDragging]);
+
+  // Setup document event listeners for dragging
+  useEffect(() => {
+    // Only add events if draggable is enabled and we're currently dragging
+    if (!draggable || !isDragging) return;
+
+    // Add global event listeners to track drag movement
+    document.addEventListener("mousemove", handleDragMove);
+    document.addEventListener("touchmove", handleDragMove, { passive: false });
+    document.addEventListener("mouseup", handleDragEnd);
+    document.addEventListener("touchend", handleDragEnd);
+    document.addEventListener("mouseleave", handleDragEnd);
+
+    // Clean up event listeners when component unmounts or dragging ends
+    return () => {
+      document.removeEventListener("mousemove", handleDragMove);
+      document.removeEventListener("touchmove", handleDragMove);
+      document.removeEventListener("mouseup", handleDragEnd);
+      document.removeEventListener("touchend", handleDragEnd);
+      document.removeEventListener("mouseleave", handleDragEnd);
+    };
+  }, [draggable, isDragging, handleDragMove, handleDragEnd]);
+
   const containerStyle = useMemo(
     () => ({
       ...style,
       ["--pause-on-hover" as string]:
         !play || pauseOnHover ? "paused" : "running",
       ["--pause-on-click" as string]:
-        !play || (pauseOnHover && !pauseOnClick) || pauseOnClick
+        !play || (pauseOnHover && !pauseOnClick) || pauseOnClick || draggable
           ? "paused"
           : "running",
       ["--width" as string]:
@@ -241,7 +466,7 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
           ? "rotate(90deg)"
           : "none",
     }),
-    [style, play, pauseOnHover, pauseOnClick, direction]
+    [style, play, pauseOnHover, pauseOnClick, direction, draggable]
   );
 
   const gradientStyle = useMemo(
@@ -305,10 +530,15 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
     <div
       ref={containerRef}
       style={containerStyle}
-      className={"rfm-marquee-container " + className}
+      className={`rfm-marquee-container ${className} ${
+        draggable ? "rfm-draggable" : ""
+      } ${isDragging ? "rfm-dragging" : ""}`}
+      onMouseDown={draggable ? handleDragStart : undefined}
+      onTouchStart={draggable ? handleDragStart : undefined}
     >
       {gradient && <div style={gradientStyle} className="rfm-overlay" />}
       <div
+        ref={firstMarqueeRef}
         className="rfm-marquee"
         style={marqueeStyle}
         onAnimationIteration={onCycleComplete}
@@ -325,7 +555,7 @@ const Marquee: FC<MarqueeProps> = forwardRef(function Marquee(
         </div>
         {multiplyChildren(multiplier - 1)}
       </div>
-      <div className="rfm-marquee" style={marqueeStyle}>
+      <div ref={secondMarqueeRef} className="rfm-marquee" style={marqueeStyle}>
         {multiplyChildren(multiplier)}
       </div>
     </div>

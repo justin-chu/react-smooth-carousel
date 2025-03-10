@@ -21,7 +21,11 @@
   height: 100%;
 
   @mixin gradient {
-    background: linear-gradient(to right, var(--gradient-color), rgb(255, 255, 255, 0));
+    background: linear-gradient(
+      to right,
+      var(--gradient-color),
+      rgb(255, 255, 255, 0)
+    );
   }
 
   &::before,
@@ -68,6 +72,16 @@
       transform: translateX(-100%);
     }
   }
+}
+
+/* Draggable functionality styles */
+.rfm-draggable {
+  cursor: grab;
+}
+
+.rfm-dragging {
+  cursor: grabbing;
+  user-select: none;
 }
 
 .rfm-initial-child-container {
